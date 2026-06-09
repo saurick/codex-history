@@ -25,6 +25,17 @@ dev_build:
 dev_start: dev_build
 	@mkdir -p $(DEV_DIR)
 	@python3 -c 'import pathlib, subprocess; log=open("$(DEV_LOG)", "ab"); p=subprocess.Popen(["$(abspath $(DEV_BIN))", "serve", "--addr", "$(DEV_ADDR)"], cwd="$(CURDIR)", stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True); pathlib.Path("$(DEV_PID)").write_text(str(p.pid) + "\n"); print(">>> started codex-history pid=%s" % p.pid); print(">>> url: http://$(DEV_ADDR)"); print(">>> log: $(DEV_LOG)")'
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -fsS "http://$(DEV_ADDR)/api/search?limit=1" >/dev/null 2>&1; then \
+			echo ">>> ready: http://$(DEV_ADDR)"; \
+			exit 0; \
+		fi; \
+		sleep 0.3; \
+	done; \
+	echo "ERROR: dev server did not become ready"; \
+	echo ">>> last log lines:"; \
+	tail -40 "$(DEV_LOG)" 2>/dev/null || true; \
+	exit 1
 
 dev_stop:
 	@echo ">>> stopping codex-history dev server"
@@ -67,5 +78,10 @@ dev_status:
 	fi
 	@if command -v lsof >/dev/null 2>&1; then \
 		lsof -nP -iTCP:$(DEV_PORT) -sTCP:LISTEN 2>/dev/null || true; \
+	fi
+	@if curl -fsS "http://$(DEV_ADDR)/api/search?limit=1" >/dev/null 2>&1; then \
+		echo "health: ok http://$(DEV_ADDR)"; \
+	else \
+		echo "health: failed http://$(DEV_ADDR)"; \
 	fi
 	@echo "log: $(DEV_LOG)"
