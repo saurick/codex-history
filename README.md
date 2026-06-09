@@ -15,7 +15,7 @@
 ```bash
 go run ./cmd/codex-history index
 go run ./cmd/codex-history search "登录"
-go run ./cmd/codex-history serve
+make dev_restart
 ```
 
 默认 Web 地址：
@@ -73,6 +73,23 @@ Web 页面里：
 - 点击结果标题或“查看内容”进入本地详情页，按原始 rollout JSONL 展示会话消息、工具调用和工具输出。
 - 点击“打开 Codex”会走 `codex://threads/<thread-id>` 深链，回到 Codex App。
 - 搜索结果默认每页显示 80 条，底部“加载更多”继续分页读取。
+
+### 本地开发服务
+
+推荐用 Makefile 管理后台进程，避免终端或 AI 会话被前台服务占住：
+
+```bash
+make dev_restart
+```
+
+常用命令：
+
+```bash
+make dev_status
+make dev_stop
+```
+
+默认监听 `127.0.0.1:8787`，PID 写入 `.tmp/codex-history.pid`，日志写入 `.tmp/codex-history.log`。
 
 ## 数据边界
 
