@@ -12,7 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func GetThreadDetail(indexDB string, id string, maxItemBytes int) (ThreadDetail, error) {
+func GetThreadDetail(indexDB string, id string, maxItemBytes int, includeDebug bool) (ThreadDetail, error) {
 	indexDB, err := normalizeIndexDB(indexDB)
 	if err != nil {
 		return ThreadDetail{}, err
@@ -29,11 +29,11 @@ func GetThreadDetail(indexDB string, id string, maxItemBytes int) (ThreadDetail,
 	if err != nil {
 		return ThreadDetail{}, err
 	}
-	detail := ThreadDetail{Thread: thread}
+	detail := ThreadDetail{Thread: thread, Debug: includeDebug}
 	if thread.RolloutPath == "" {
 		return detail, nil
 	}
-	items, err := readThreadItems(thread.RolloutPath, maxItemBytes)
+	items, err := readThreadItems(thread.RolloutPath, maxItemBytes, includeDebug)
 	if err != nil {
 		return ThreadDetail{}, err
 	}
@@ -47,6 +47,9 @@ func loadIndexedThread(indexDB string, id string) (Thread, error) {
 		return Thread{}, err
 	}
 	defer db.Close()
+	if _, err := db.Exec(`pragma busy_timeout = 5000`); err != nil {
+		return Thread{}, err
+	}
 
 	var thread Thread
 	var createdAt, updatedAt int64
@@ -90,7 +93,7 @@ func loadIndexedThread(indexDB string, id string) (Thread, error) {
 	return thread, nil
 }
 
-func readThreadItems(path string, maxItemBytes int) ([]ThreadItem, error) {
+func readThreadItems(path string, maxItemBytes int, includeDebug bool) ([]ThreadItem, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open rollout: %w", err)
@@ -101,7 +104,7 @@ func readThreadItems(path string, maxItemBytes int) ([]ThreadItem, error) {
 	scanner.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	var items []ThreadItem
 	for scanner.Scan() {
-		item, ok := parseThreadLine(scanner.Bytes(), maxItemBytes)
+		item, ok := parseThreadLine(scanner.Bytes(), maxItemBytes, includeDebug)
 		if ok {
 			items = append(items, item)
 		}
@@ -112,13 +115,16 @@ func readThreadItems(path string, maxItemBytes int) ([]ThreadItem, error) {
 	return items, nil
 }
 
-func parseThreadLine(line []byte, maxItemBytes int) (ThreadItem, bool) {
+func parseThreadLine(line []byte, maxItemBytes int, includeDebug bool) (ThreadItem, bool) {
 	var record struct {
 		Timestamp string         `json:"timestamp"`
 		Type      string         `json:"type"`
 		Payload   map[string]any `json:"payload"`
 	}
 	if err := json.Unmarshal(line, &record); err != nil {
+		if !includeDebug {
+			return ThreadItem{}, false
+		}
 		text, truncated := truncateTextBytes(string(line), maxItemBytes)
 		return ThreadItem{Kind: "raw", Title: "unparsed line", Text: text, Truncated: truncated}, true
 	}
@@ -127,23 +133,29 @@ func parseThreadLine(line []byte, maxItemBytes int) (ThreadItem, bool) {
 	}
 	switch record.Type {
 	case "response_item":
-		return parseResponseItem(record.Timestamp, record.Payload, maxItemBytes)
+		return parseResponseItem(record.Timestamp, record.Payload, maxItemBytes, includeDebug)
 	case "event_msg":
+		if !includeDebug {
+			return ThreadItem{}, false
+		}
 		return parseEventMessage(record.Timestamp, record.Payload, maxItemBytes)
 	default:
 		return ThreadItem{}, false
 	}
 }
 
-func parseResponseItem(timestamp string, payload map[string]any, maxItemBytes int) (ThreadItem, bool) {
+func parseResponseItem(timestamp string, payload map[string]any, maxItemBytes int, includeDebug bool) (ThreadItem, bool) {
 	switch stringField(payload, "type") {
 	case "message":
+		role := stringField(payload, "role")
+		if !includeDebug && role != "user" && role != "assistant" {
+			return ThreadItem{}, false
+		}
 		text := contentText(payload["content"])
 		if strings.TrimSpace(text) == "" {
 			return ThreadItem{}, false
 		}
 		text, truncated := truncateTextBytes(text, maxItemBytes)
-		role := stringField(payload, "role")
 		title := role
 		if phase := stringField(payload, "phase"); phase != "" {
 			title += " / " + phase
@@ -157,6 +169,9 @@ func parseResponseItem(timestamp string, payload map[string]any, maxItemBytes in
 			Truncated: truncated,
 		}, true
 	case "function_call":
+		if !includeDebug {
+			return ThreadItem{}, false
+		}
 		name := stringField(payload, "name")
 		args := stringField(payload, "arguments")
 		if strings.TrimSpace(args) == "" {
@@ -171,6 +186,9 @@ func parseResponseItem(timestamp string, payload map[string]any, maxItemBytes in
 			Truncated: truncated,
 		}, true
 	case "function_call_output":
+		if !includeDebug {
+			return ThreadItem{}, false
+		}
 		output := stringField(payload, "output")
 		if strings.TrimSpace(output) == "" {
 			return ThreadItem{}, false
@@ -184,6 +202,9 @@ func parseResponseItem(timestamp string, payload map[string]any, maxItemBytes in
 			Truncated: truncated,
 		}, true
 	case "reasoning":
+		if !includeDebug {
+			return ThreadItem{}, false
+		}
 		text := reasoningSummary(payload["summary"])
 		if strings.TrimSpace(text) == "" {
 			return ThreadItem{}, false

@@ -38,7 +38,8 @@ func Serve(opts ServerOptions) error {
 	})
 	mux.HandleFunc("/thread", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		detail, err := GetThreadDetail(indexDB, id, 120_000)
+		includeDebug := r.URL.Query().Get("debug") == "1"
+		detail, err := GetThreadDetail(indexDB, id, 120_000, includeDebug)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -47,9 +48,11 @@ func Serve(opts ServerOptions) error {
 		_ = detailTemplate.Execute(w, struct {
 			ThreadDetail
 			SafeCodexURL template.URL
+			DebugURL     string
 		}{
 			ThreadDetail: detail,
 			SafeCodexURL: template.URL(detail.CodexURL),
+			DebugURL:     "/thread?id=" + template.URLQueryEscaper(detail.ID) + "&debug=1",
 		})
 	})
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +75,7 @@ func Serve(opts ServerOptions) error {
 		})
 	})
 	mux.HandleFunc("/api/thread", func(w http.ResponseWriter, r *http.Request) {
-		detail, err := GetThreadDetail(indexDB, r.URL.Query().Get("id"), 120_000)
+		detail, err := GetThreadDetail(indexDB, r.URL.Query().Get("id"), 120_000, r.URL.Query().Get("debug") == "1")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -292,6 +295,7 @@ var detailTemplate = template.Must(template.New("detail").Parse(`<!doctype html>
     <nav class="nav">
       <a href="/">返回搜索</a>
       <a href="{{.SafeCodexURL}}">打开 Codex</a>
+      {{if .Debug}}<a href="/thread?id={{.ID}}">隐藏调试事件</a>{{else}}<a href="{{.DebugURL}}">显示调试事件</a>{{end}}
     </nav>
     <h1>{{.Title}}</h1>
     <div class="meta">{{.ID}}</div>

@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -231,77 +229,51 @@ func extractSessionText(path string, maxBytes int) (string, error) {
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			appendSessionLine(&builder, line, maxBytes)
+			appendConversationLine(&builder, line, maxBytes)
 			if builder.Len() >= maxBytes {
 				break
 			}
 		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
 		if err != nil {
-			return builder.String(), nil
+			break
 		}
 	}
 	return builder.String(), nil
 }
 
-func appendSessionLine(builder *strings.Builder, line []byte, maxBytes int) {
-	var value any
-	if err := json.Unmarshal(line, &value); err != nil {
-		appendLimited(builder, string(line), maxBytes)
+func appendConversationLine(builder *strings.Builder, line []byte, maxBytes int) {
+	var record struct {
+		Type    string         `json:"type"`
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &record); err != nil {
 		return
 	}
-	var parts []string
-	collectStrings(value, "", &parts)
-	if len(parts) == 0 {
+	text := conversationText(record.Type, record.Payload)
+	if strings.TrimSpace(text) == "" {
 		return
 	}
-	appendLimited(builder, strings.Join(parts, "\n"), maxBytes)
+	appendLimited(builder, text, maxBytes)
 	appendLimited(builder, "\n", maxBytes)
 }
 
-func collectStrings(value any, key string, out *[]string) {
-	switch v := value.(type) {
-	case map[string]any:
-		for k, child := range v {
-			collectStrings(child, k, out)
-		}
-	case []any:
-		for _, child := range v {
-			collectStrings(child, key, out)
-		}
-	case string:
-		if shouldIndexStringKey(key, v) {
-			*out = append(*out, v)
-		}
+func conversationText(recordType string, payload map[string]any) string {
+	if payload == nil {
+		return ""
 	}
-}
-
-func shouldIndexStringKey(key string, value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-	if len(value) > 50_000 {
-		return false
-	}
-	switch key {
-	case "text", "content", "message", "body", "summary", "cmd", "command", "title", "preview", "name", "cwd", "path":
-		return true
+	switch recordType {
+	case "response_item":
+		if stringField(payload, "type") != "message" {
+			return ""
+		}
+		role := stringField(payload, "role")
+		if role != "user" && role != "assistant" {
+			return ""
+		}
+		return contentText(payload["content"])
 	default:
-		return len(value) >= 8 && !looksLikeOpaqueID(value)
+		return ""
 	}
-}
-
-func looksLikeOpaqueID(value string) bool {
-	if len(value) > 180 {
-		return true
-	}
-	if strings.Count(value, "-") >= 4 && len(value) >= 32 {
-		return true
-	}
-	return false
 }
 
 func appendLimited(builder *strings.Builder, value string, maxBytes int) {
@@ -410,7 +382,7 @@ func writeIndex(path string, threads []Thread) error {
 			thread.Title,
 			thread.CWD,
 			thread.FirstUserMessage,
-			thread.Preview,
+			"",
 			thread.Content,
 		); err != nil {
 			_ = tx.Rollback()

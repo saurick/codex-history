@@ -24,6 +24,9 @@ func Search(indexDB string, opts SearchOptions) ([]SearchResult, error) {
 		return nil, err
 	}
 	defer db.Close()
+	if _, err := db.Exec(`pragma busy_timeout = 5000`); err != nil {
+		return nil, err
+	}
 
 	query := strings.TrimSpace(opts.Query)
 	like := "%" + escapeLike(query) + "%"
@@ -50,7 +53,6 @@ func Search(indexDB string, opts SearchOptions) ([]SearchResult, error) {
 				or title like ? escape '\'
 				or cwd like ? escape '\'
 				or first_user_message like ? escape '\'
-				or preview like ? escape '\'
 			union
 			select id from thread_fts
 			where thread_fts match ?
@@ -64,7 +66,7 @@ func Search(indexDB string, opts SearchOptions) ([]SearchResult, error) {
 			), '') as content
 		from threads t
 		where t.id in (select id from matched_ids)`
-		args = append([]any{query, like, like, like, like, quoteFTS(query)}, args...)
+		args = append([]any{query, like, like, like, quoteFTS(query)}, args...)
 	} else {
 		sqlText = `
 		select
@@ -92,7 +94,7 @@ func Search(indexDB string, opts SearchOptions) ([]SearchResult, error) {
 	}
 	defer rows.Close()
 
-	var results []SearchResult
+	results := make([]SearchResult, 0)
 	for rows.Next() {
 		var result SearchResult
 		var createdAt, updatedAt int64
@@ -141,7 +143,7 @@ func quoteFTS(value string) string {
 
 func makeSnippet(query string, result SearchResult) string {
 	query = strings.TrimSpace(query)
-	fields := []string{result.Title, result.FirstUserMessage, result.Preview, result.Content}
+	fields := []string{result.Title, result.FirstUserMessage, result.Content}
 	if query == "" {
 		for _, field := range fields {
 			if s := compact(field); s != "" {
@@ -195,6 +197,9 @@ func Count(indexDB string) (int, error) {
 		return 0, err
 	}
 	defer db.Close()
+	if _, err := db.Exec(`pragma busy_timeout = 5000`); err != nil {
+		return 0, err
+	}
 	var count int
 	if err := db.QueryRow("select count(*) from threads").Scan(&count); err != nil {
 		return 0, fmt.Errorf("index db not ready, run index first: %w", err)

@@ -34,6 +34,7 @@ type SearchResult struct {
 type ThreadDetail struct {
 	Thread
 	Items []ThreadItem `json:"items"`
+	Debug bool         `json:"debug"`
 }
 
 type ThreadItem struct {
