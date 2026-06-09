@@ -76,10 +76,16 @@ Web 页面里：
 
 ### 本地开发服务
 
-推荐用 Makefile 管理后台进程，避免终端或 AI 会话被前台服务占住：
+推荐用 Makefile 管理本地开发服务。和其他项目一样，`make dev_restart` 会前台常驻并直接输出日志：
 
 ```bash
 make dev_restart
+```
+
+需要后台启动时使用：
+
+```bash
+make dev_restart_bg
 ```
 
 常用命令：
@@ -89,7 +95,7 @@ make dev_status
 make dev_stop
 ```
 
-默认监听 `127.0.0.1:8787`，PID 写入 `.tmp/codex-history.pid`，日志写入 `.tmp/codex-history.log`。
+默认监听 `127.0.0.1:8787`。后台模式会把 PID 写入 `.tmp/codex-history.pid`，日志写入 `.tmp/codex-history.log`。
 
 ## 数据边界
 

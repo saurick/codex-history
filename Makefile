@@ -5,7 +5,7 @@ DEV_BIN ?= ./codex-history
 DEV_PID ?= $(DEV_DIR)/codex-history.pid
 DEV_LOG ?= $(DEV_DIR)/codex-history.log
 
-.PHONY: build test index serve dev_build dev_start dev_stop dev_restart dev_status
+.PHONY: build test index serve dev_build dev dev_start_bg dev_stop dev_restart dev_restart_bg dev_status
 
 build:
 	go build -o ./codex-history ./cmd/codex-history
@@ -22,7 +22,11 @@ serve:
 dev_build:
 	go build -o $(DEV_BIN) ./cmd/codex-history
 
-dev_start: dev_build
+dev: dev_build
+	@echo ">>> running codex-history on http://$(DEV_ADDR)"
+	@$(DEV_BIN) serve --addr "$(DEV_ADDR)"
+
+dev_start_bg: dev_build
 	@mkdir -p $(DEV_DIR)
 	@python3 -c 'import pathlib, subprocess; log=open("$(DEV_LOG)", "ab"); p=subprocess.Popen(["$(abspath $(DEV_BIN))", "serve", "--addr", "$(DEV_ADDR)"], cwd="$(CURDIR)", stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True); pathlib.Path("$(DEV_PID)").write_text(str(p.pid) + "\n"); print(">>> started codex-history pid=%s" % p.pid); print(">>> url: http://$(DEV_ADDR)"); print(">>> log: $(DEV_LOG)")'
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
@@ -63,7 +67,9 @@ dev_stop:
 		fi; \
 	fi
 
-dev_restart: dev_stop dev_start
+dev_restart: dev_stop dev
+
+dev_restart_bg: dev_stop dev_start_bg
 
 dev_status:
 	@if [ -f "$(DEV_PID)" ]; then \
