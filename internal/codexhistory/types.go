@@ -33,8 +33,10 @@ type SearchResult struct {
 
 type ThreadDetail struct {
 	Thread
-	Items []ThreadItem `json:"items"`
-	Debug bool         `json:"debug"`
+	Items             []ThreadItem `json:"items"`
+	ConversationItems []ThreadItem `json:"conversation_items"`
+	DebugItems        []ThreadItem `json:"debug_items"`
+	Debug             bool         `json:"debug"`
 }
 
 type ThreadItem struct {

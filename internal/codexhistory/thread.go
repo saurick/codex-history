@@ -33,11 +33,17 @@ func GetThreadDetail(indexDB string, id string, maxItemBytes int, includeDebug b
 	if thread.RolloutPath == "" {
 		return detail, nil
 	}
-	items, err := readThreadItems(thread.RolloutPath, maxItemBytes, includeDebug)
+	conversationItems, debugItems, err := readThreadItems(thread.RolloutPath, maxItemBytes)
 	if err != nil {
 		return ThreadDetail{}, err
 	}
-	detail.Items = items
+	detail.ConversationItems = conversationItems
+	detail.DebugItems = debugItems
+	if includeDebug {
+		detail.Items = debugItems
+	} else {
+		detail.Items = conversationItems
+	}
 	return detail, nil
 }
 
@@ -93,26 +99,30 @@ func loadIndexedThread(indexDB string, id string) (Thread, error) {
 	return thread, nil
 }
 
-func readThreadItems(path string, maxItemBytes int, includeDebug bool) ([]ThreadItem, error) {
+func readThreadItems(path string, maxItemBytes int) ([]ThreadItem, []ThreadItem, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open rollout: %w", err)
+		return nil, nil, fmt.Errorf("open rollout: %w", err)
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 64*1024*1024)
-	var items []ThreadItem
+	var conversationItems []ThreadItem
+	var debugItems []ThreadItem
 	for scanner.Scan() {
-		item, ok := parseThreadLine(scanner.Bytes(), maxItemBytes, includeDebug)
-		if ok {
-			items = append(items, item)
+		if item, ok := parseThreadLine(scanner.Bytes(), maxItemBytes, false); ok {
+			conversationItems = append(conversationItems, item)
+			continue
+		}
+		if item, ok := parseThreadLine(scanner.Bytes(), maxItemBytes, true); ok {
+			debugItems = append(debugItems, item)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return items, err
+		return conversationItems, debugItems, err
 	}
-	return items, nil
+	return conversationItems, debugItems, nil
 }
 
 func parseThreadLine(line []byte, maxItemBytes int, includeDebug bool) (ThreadItem, bool) {

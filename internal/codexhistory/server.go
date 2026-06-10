@@ -47,12 +47,14 @@ func Serve(opts ServerOptions) error {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = detailTemplate.Execute(w, struct {
 			ThreadDetail
-			SafeCodexURL template.URL
-			DebugURL     string
+			SafeCodexURL    template.URL
+			ConversationURL string
+			DebugURL        string
 		}{
-			ThreadDetail: detail,
-			SafeCodexURL: template.URL(detail.CodexURL),
-			DebugURL:     "/thread?id=" + template.URLQueryEscaper(detail.ID) + "&debug=1",
+			ThreadDetail:    detail,
+			SafeCodexURL:    template.URL(detail.CodexURL),
+			ConversationURL: "/thread?id=" + template.URLQueryEscaper(detail.ID),
+			DebugURL:        "/thread?id=" + template.URLQueryEscaper(detail.ID) + "&debug=1",
 		})
 	})
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
@@ -277,15 +279,21 @@ var detailTemplate = template.Must(template.New("detail").Parse(`<!doctype html>
     a { color: LinkText; }
     .nav { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; font-size: 13px; }
     .meta { color: color-mix(in srgb, CanvasText 60%, transparent); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-    .items { margin-top: 16px; display: grid; gap: 14px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 12px; border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+    .tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; text-decoration: none; color: color-mix(in srgb, CanvasText 68%, transparent); }
+    .tab.active { color: CanvasText; border-color: color-mix(in srgb, CanvasText 14%, transparent); background: color-mix(in srgb, CanvasText 5%, Canvas); font-weight: 650; }
+    .count { color: color-mix(in srgb, CanvasText 54%, transparent); font-size: 12px; font-weight: 500; }
+    .items { display: grid; gap: 14px; }
     .item { border: 1px solid color-mix(in srgb, CanvasText 12%, transparent); border-radius: 8px; padding: 12px; background: color-mix(in srgb, CanvasText 3%, Canvas); }
     .item-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 8px; }
     .badge { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 999px; padding: 2px 8px; font-size: 12px; color: color-mix(in srgb, CanvasText 70%, transparent); }
     .message.user .badge { color: #0a7f42; }
     .message.assistant .badge { color: #5b5fc7; }
-    .tool .badge, .tool-output .badge { color: #a45c00; }
+    .message.developer .badge, .tool .badge, .tool-output .badge, .event .badge, .reasoning .badge { color: #a45c00; }
     .timestamp { color: color-mix(in srgb, CanvasText 54%, transparent); font-size: 12px; }
     pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    details pre { margin-top: 8px; }
+    summary { cursor: pointer; overflow-wrap: anywhere; }
     .truncated { margin-top: 8px; color: color-mix(in srgb, CanvasText 58%, transparent); font-size: 12px; }
     .empty { padding: 28px 0; color: color-mix(in srgb, CanvasText 62%, transparent); }
   </style>
@@ -295,7 +303,6 @@ var detailTemplate = template.Must(template.New("detail").Parse(`<!doctype html>
     <nav class="nav">
       <a href="/">返回搜索</a>
       <a href="{{.SafeCodexURL}}">打开 Codex</a>
-      {{if .Debug}}<a href="/thread?id={{.ID}}">隐藏调试事件</a>{{else}}<a href="{{.DebugURL}}">显示调试事件</a>{{end}}
     </nav>
     <h1>{{.Title}}</h1>
     <div class="meta">{{.ID}}</div>
@@ -304,21 +311,51 @@ var detailTemplate = template.Must(template.New("detail").Parse(`<!doctype html>
     <div class="meta">updated: {{if not .UpdatedAt.IsZero}}{{.UpdatedAt.Format "2006-01-02 15:04:05"}}{{end}}</div>
   </header>
   <main>
-    {{if .Items}}
-      <section class="items">
-        {{range .Items}}
-          <article class="item {{.Kind}} {{.Role}}">
-            <div class="item-header">
-              <span class="badge">{{.Title}}</span>
-              <span class="timestamp">{{.Timestamp}}</span>
-            </div>
-            <pre>{{.Text}}</pre>
-            {{if .Truncated}}<div class="truncated">这条内容太长，网页视图已截断；需要逐字核对时请查看上方原始 JSONL 文件。</div>{{end}}
-          </article>
-        {{end}}
-      </section>
+    <nav class="tabs" aria-label="会话内容分类">
+      <a class="tab {{if not .Debug}}active{{end}}" href="{{.ConversationURL}}">对话 <span class="count">{{len .ConversationItems}}</span></a>
+      <a class="tab {{if .Debug}}active{{end}}" href="{{.DebugURL}}">调试事件 <span class="count">{{len .DebugItems}}</span></a>
+    </nav>
+    {{if .Debug}}
+      {{if .DebugItems}}
+        <section class="items">
+          {{range .DebugItems}}
+            <article class="item {{.Kind}} {{.Role}}">
+              <div class="item-header">
+                <span class="badge">{{.Title}}</span>
+                <span class="timestamp">{{.Timestamp}}</span>
+              </div>
+              {{if or (eq .Kind "tool-output") (eq .Kind "tool")}}
+                <details>
+                  <summary>{{.Title}}</summary>
+                  <pre>{{.Text}}</pre>
+                </details>
+              {{else}}
+                <pre>{{.Text}}</pre>
+              {{end}}
+              {{if .Truncated}}<div class="truncated">这条内容太长，网页视图已截断；需要逐字核对时请查看上方原始 JSONL 文件。</div>{{end}}
+            </article>
+          {{end}}
+        </section>
+      {{else}}
+        <div class="empty">这个会话没有调试事件。</div>
+      {{end}}
     {{else}}
-      <div class="empty">这个会话没有可展示的消息项；可以查看上方原始 JSONL 路径。</div>
+      {{if .ConversationItems}}
+        <section class="items">
+          {{range .ConversationItems}}
+            <article class="item {{.Kind}} {{.Role}}">
+              <div class="item-header">
+                <span class="badge">{{.Title}}</span>
+                <span class="timestamp">{{.Timestamp}}</span>
+              </div>
+              <pre>{{.Text}}</pre>
+              {{if .Truncated}}<div class="truncated">这条内容太长，网页视图已截断；需要逐字核对时请查看上方原始 JSONL 文件。</div>{{end}}
+            </article>
+          {{end}}
+        </section>
+      {{else}}
+        <div class="empty">这个会话没有可展示的对话内容；可以切到“调试事件”或查看上方原始 JSONL 路径。</div>
+      {{end}}
     {{end}}
   </main>
 </body>
